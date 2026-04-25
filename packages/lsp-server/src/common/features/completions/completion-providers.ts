@@ -1,13 +1,13 @@
 import { Logger } from '@bean-lsp/shared/logger';
 import { add, formatDate, sub } from 'date-fns';
-import {
-	CompletionItem,
-	CompletionItemKind,
-	Position,
-	TextEdit,
-} from 'vscode-languageserver';
+import { CompletionItem, CompletionItemKind, Position, TextEdit } from 'vscode-languageserver';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
-import { SymbolIndex, type CompiledAccountCandidate } from '../symbol-index';
+import { type CompiledAccountCandidate, SymbolIndex } from '../symbol-index';
+import {
+	deriveAccountQueryFromLine,
+	shouldSuppressCurrencyForCurrentToken,
+	shouldTraceAccountQuery,
+} from './completion-context';
 import {
 	type AccountMatchRank,
 	compareAccountRank,
@@ -18,11 +18,6 @@ import {
 	rankSymbolLikeMatchTier,
 	rankTextMatchTier,
 } from './completion-ranking';
-import {
-	deriveAccountQueryFromLine,
-	shouldSuppressCurrencyForCurrentToken,
-	shouldTraceAccountQuery,
-} from './completion-context';
 
 const logger = new Logger('completions');
 
@@ -373,7 +368,9 @@ export async function addAccountCompletions(collector: CompletionCollector): Pro
 		}
 
 		const usageCount = accountUsageCounts.get(account.name) || 0;
-		const rank = hasActiveQuery ? rankCompiledAccountQuery(compiledQuery, account, usageCount) : makeEmptyAccountRank(usageCount);
+		const rank = hasActiveQuery
+			? rankCompiledAccountQuery(compiledQuery, account, usageCount)
+			: makeEmptyAccountRank(usageCount);
 		if (!rank) return false;
 		accountRanks.set(account.name, rank);
 		accountMatchScores.set(account.name, rank.tier * 100 + rank.rootQuality * 10 + (rank.tailHit ? 5 : 0));
@@ -420,6 +417,9 @@ export async function addAccountCompletions(collector: CompletionCollector): Pro
 				detail += `Closed on ${closedDate}`;
 			}
 		}
+		const normalizedFilterText = query
+			? `${query} ${collector.symbolIndex.getFilterText(accountName)}`
+			: undefined;
 		addCompletionItem(
 			collector,
 			{ label: accountName, kind: CompletionItemKind.Field, detail },
@@ -433,13 +433,20 @@ export async function addAccountCompletions(collector: CompletionCollector): Pro
 			usageCount,
 			accountMatchScores.get(accountName),
 			String(index).padStart(7, '0'),
+			normalizedFilterText,
 		);
 	});
 	const buildItemsMs = performance.now() - buildItemsStart;
 	const totalMs = performance.now() - accountPerfStart;
 	if (shouldTrace || totalMs > 30) {
 		logger.info(
-			`[account-query-perf] snapshotFetchMs=${Math.round(snapshotFetchMs)} queryCompileMs=${Math.round(queryCompileMs)} rankFilterMs=${Math.round(rankFilterMs)} sortMs=${Math.round(sortMs)} buildItemsMs=${Math.round(buildItemsMs)} totalMs=${Math.round(totalMs)} accountsTotal=${accounts.length} accountsMatched=${filteredAccounts.length}`,
+			`[account-query-perf] snapshotFetchMs=${Math.round(snapshotFetchMs)} queryCompileMs=${
+				Math.round(queryCompileMs)
+			} rankFilterMs=${Math.round(rankFilterMs)} sortMs=${Math.round(sortMs)} buildItemsMs=${
+				Math.round(buildItemsMs)
+			} totalMs=${
+				Math.round(totalMs)
+			} accountsTotal=${accounts.length} accountsMatched=${filteredAccounts.length}`,
 		);
 	}
 }
