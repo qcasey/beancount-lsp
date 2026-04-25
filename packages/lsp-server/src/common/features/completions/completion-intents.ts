@@ -182,7 +182,11 @@ export function resolveCompletionIntent(
 		if (textCtx.afterCaret) {
 			intents.push({ type: 'link' });
 		}
-		if (/^[AEIL][:A-Za-z0-9._/-]*$/i.test(textCtx.tokenText)) {
+		if (
+			/^[AEIL][:A-Za-z0-9._/-]*$/i.test(textCtx.tokenText)
+			|| (textCtx.tokenText.length > 0 && /^\s/.test(textCtx.linePrefix)
+				&& /^[\p{L}\p{N}:._/-]+$/u.test(textCtx.tokenText))
+		) {
 			intents.push({ type: 'account' });
 		}
 	}

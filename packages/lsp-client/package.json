@@ -254,7 +254,8 @@
 			"[beancount]": {
 				"editor.semanticHighlighting.enabled": true,
 				"editor.inlayHints.enabled": "on",
-				"editor.inlayHints.maximumLength": 0
+				"editor.inlayHints.maximumLength": 0,
+				"editor.wordBasedSuggestions": "off"
 			}
 		},
 		"commands": [

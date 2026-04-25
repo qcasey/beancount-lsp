@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Position } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import {
-	type TriggerInfo,
-} from '../../common/features/completions';
+import { type TriggerInfo } from '../../common/features/completions';
 import {
 	buildCompletionTextContext,
 	deriveAccountQueryFromLine,
@@ -12,10 +10,10 @@ import {
 import { resolveCompletionIntent } from '../../common/features/completions/completion-intents';
 import {
 	compareAccountRank,
+	rankAccountQuery,
 	rankCurrencyMatchTier,
 	rankSymbolLikeMatchTier,
 	rankTextMatchTier,
-	rankAccountQuery,
 } from '../../common/features/completions/completion-ranking';
 
 function makeDoc(line: string): TextDocument {
@@ -99,6 +97,22 @@ describe('completion intent guards', () => {
 			ctx,
 		);
 		expect(intents.some((intent) => intent.type === 'currency')).toBe(false);
+	});
+
+	it('triggers account intent for non-AEIL token on indented line', () => {
+		const line = '  groceries';
+		const doc = makeDoc(line);
+		const ctx = buildCompletionTextContext(doc, endPos(line));
+		const intents = resolveCompletionIntent(makeTriggerInfo(), ctx);
+		expect(intents.some((intent) => intent.type === 'account')).toBe(true);
+	});
+
+	it('triggers account intent for colon-separated query on indented line', () => {
+		const line = '  cat:';
+		const doc = makeDoc(line);
+		const ctx = buildCompletionTextContext(doc, endPos(line));
+		const intents = resolveCompletionIntent(makeTriggerInfo(), ctx);
+		expect(intents.some((intent) => intent.type === 'account')).toBe(true);
 	});
 
 	it('allows currency intent when previous token is number and current token is empty', () => {
@@ -224,9 +238,12 @@ describe('rankAccountQuery', () => {
 		expect(matched!.matchedSegmentCount).toBe(2);
 	});
 
-	it('rejects collapsed shorthand with wrong segment order', () => {
-		const rejected = rankAccountQuery('ASB', 'Assets:Bank:Savings', 1);
-		expect(rejected).toBeNull();
+	it('ranks collapsed shorthand with wrong segment order at lowest tier', () => {
+		const correct = rankAccountQuery('ABS', 'Assets:Bank:Savings', 1);
+		const wrongOrder = rankAccountQuery('ASB', 'Assets:Bank:Savings', 1);
+		expect(correct).not.toBeNull();
+		expect(wrongOrder).not.toBeNull();
+		expect(compareAccountRank(correct!, wrongOrder!)).toBeLessThan(0);
 	});
 
 	// The fallback below is intentionally narrower than a full-label fuzzy matcher.
@@ -255,10 +272,13 @@ describe('rankAccountQuery', () => {
 		expect(compareAccountRank(intended!, weaker!)).toBeLessThan(0);
 	});
 
-	it('does not relax ASB into a full-label fuzzy match', () => {
-		// The fallback must not consume tail characters from the root segment text.
-		const rejected = rankAccountQuery('ASB', 'Assets:Bank:Savings', 1);
-		expect(rejected).toBeNull();
+	it('ranks ASB as floating fuzzy far below root-anchored matches', () => {
+		const rootAnchored = rankAccountQuery('ABS', 'Assets:Bank:Savings', 1);
+		const floating = rankAccountQuery('ASB', 'Assets:Bank:Savings', 1);
+		expect(rootAnchored).not.toBeNull();
+		expect(floating).not.toBeNull();
+		expect(floating!.tier).toBeLessThan(0);
+		expect(compareAccountRank(rootAnchored!, floating!)).toBeLessThan(0);
 	});
 
 	it('still rejects query when the root anchor mismatches', () => {
@@ -266,6 +286,33 @@ describe('rankAccountQuery', () => {
 		expect(rejected).toBeNull();
 	});
 
+	it('matches floating segment query for non-root segment with colon', () => {
+		const matched = rankAccountQuery('Cat:', 'Expenses:Personal:Cat:Supplies', 1);
+		expect(matched).not.toBeNull();
+	});
+
+	it('matches floating segment query for middle segment', () => {
+		const matched = rankAccountQuery('Personal:', 'Expenses:Personal:Groceries', 1);
+		expect(matched).not.toBeNull();
+	});
+
+	it('matches floating segment query with sub-segments', () => {
+		const matched = rankAccountQuery('Cat:Sup', 'Expenses:Personal:Cat:Supplies', 1);
+		expect(matched).not.toBeNull();
+	});
+
+	it('ranks root-anchored match above floating segment match', () => {
+		const rooted = rankAccountQuery('E:Cat', 'Expenses:Personal:Cat:Supplies', 1);
+		const floating = rankAccountQuery('Cat:', 'Expenses:Personal:Cat:Supplies', 1);
+		expect(rooted).not.toBeNull();
+		expect(floating).not.toBeNull();
+		expect(compareAccountRank(rooted!, floating!)).toBeLessThan(0);
+	});
+
+	it('matches collapsed non-root query against account segments', () => {
+		const matched = rankAccountQuery('groceries', 'Expenses:Personal:Groceries', 1);
+		expect(matched).not.toBeNull();
+	});
 });
 
 describe('rankTextMatchTier', () => {

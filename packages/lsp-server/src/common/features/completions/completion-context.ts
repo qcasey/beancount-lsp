@@ -63,7 +63,7 @@ export function deriveAccountQueryFromLine(linePrefix: string): string {
 }
 
 export function shouldTraceAccountQuery(linePrefix: string, tokenText: string): boolean {
-	return /(?:^|\s)[AEIL](?::|：)/i.test(linePrefix) || /^[AEIL](?::|：)/i.test(tokenText);
+	return /(?:^|\s)[AEIL](?::|：)/i.test(linePrefix) || /^[AEIL](?::|：)/i.test(tokenText) || tokenText.includes(':');
 }
 
 function getCurrentWhitespaceToken(linePrefix: string): string {

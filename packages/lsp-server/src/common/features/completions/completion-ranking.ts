@@ -496,6 +496,84 @@ function rankRootAnchoredTailSubsequenceFallback(
 	};
 }
 
+function rankFloatingSegmentQuery(
+	normalizedQueryParts: string[],
+	account: CompiledAccountCandidate,
+	usageCount: number,
+): AccountMatchRank | null {
+	if (normalizedQueryParts.length === 0 || account.partsLower.length === 0) {
+		return null;
+	}
+
+	let bestRank: AccountMatchRank | null = null;
+
+	for (let startSeg = 0; startSeg < account.partsLower.length; startSeg++) {
+		const firstMatch = findBestSegmentMatch(
+			account.partsLower,
+			account.partsRaw,
+			startSeg,
+			normalizedQueryParts[0]!,
+		);
+		if (!firstMatch) continue;
+
+		let segStart = firstMatch.endIndex + 1;
+		let valid = true;
+		let fuzzyCount = firstMatch.kind === 'fuzzy' ? 1 : 0;
+		let prefixOrSubCount = (firstMatch.kind === 'prefix' || firstMatch.kind === 'substring') ? 1 : 0;
+		let gapCount = firstMatch.index;
+		let lastMatchEnd = firstMatch.endIndex;
+		let tailHit = normalizedQueryParts.length === 1 && firstMatch.endIndex === account.partsLower.length - 1;
+
+		for (let i = 1; i < normalizedQueryParts.length; i++) {
+			const match = findBestSegmentMatch(
+				account.partsLower,
+				account.partsRaw,
+				segStart,
+				normalizedQueryParts[i]!,
+			);
+			if (!match) {
+				valid = false;
+				break;
+			}
+			if (match.kind === 'fuzzy') fuzzyCount++;
+			if (match.kind === 'prefix' || match.kind === 'substring') prefixOrSubCount++;
+			gapCount += Math.max(0, match.index - lastMatchEnd - 1);
+			lastMatchEnd = match.endIndex;
+			segStart = match.endIndex + 1;
+			if (i === normalizedQueryParts.length - 1) {
+				tailHit = match.endIndex === account.partsLower.length - 1;
+			}
+		}
+
+		if (!valid) continue;
+
+		let tier: number;
+		if (fuzzyCount > 0) {
+			tier = -2;
+		} else if (prefixOrSubCount > 0) {
+			tier = -1;
+		} else {
+			tier = 0;
+		}
+
+		const rank: AccountMatchRank = {
+			tier,
+			matchedSegmentCount: normalizedQueryParts.length,
+			gapCount: gapCount + account.partsLower.length,
+			rootQuality: 0,
+			tailHit,
+			fuzzyCount,
+			usageBucket: Math.min(usageCount, 20),
+		};
+
+		if (!bestRank || compareAccountRank(rank, bestRank) < 0) {
+			bestRank = rank;
+		}
+	}
+
+	return bestRank;
+}
+
 export function rankCompiledAccountQuery(
 	compiledQuery: CompiledAccountQuery,
 	account: CompiledAccountCandidate,
@@ -506,11 +584,13 @@ export function rankCompiledAccountQuery(
 		return makeEmptyAccountRank(usageCount);
 	}
 	if (compiledQuery.hasExplicitSeparators) {
-		return rankStructuredAccountQuery(normalizedQueryParts, account, usageCount);
+		return rankStructuredAccountQuery(normalizedQueryParts, account, usageCount)
+			?? rankFloatingSegmentQuery(normalizedQueryParts, account, usageCount);
 	}
 
 	return rankCollapsedAccountQuery(compiledQuery, account, usageCount)
-		?? rankRootAnchoredTailSubsequenceFallback(compiledQuery, account, usageCount);
+		?? rankRootAnchoredTailSubsequenceFallback(compiledQuery, account, usageCount)
+		?? rankFloatingSegmentQuery(normalizedQueryParts, account, usageCount);
 }
 
 export function rankAccountQuery(
